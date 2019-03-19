@@ -1,0 +1,259 @@
+---
+title: "Homework 2"
+author: "Xinyi Lin"
+date: "3/19/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, message=FALSE}
+library(tidyverse)
+library(caret)
+library(boot)  # for smooth spline
+library(ggplot2)
+library(mgcv)   # for gam
+```
+
+```{r, message=FALSE}
+concrete_data = read_csv("./concrete.csv") %>% 
+  janitor::clean_names()
+```
+
+## Question 1
+
+```{r}
+x = concrete_data[,1:8]
+y = y = as.numeric(unlist(concrete_data[,9]))
+featurePlot(x, y, "scatter")
+```
+
+## Question 2
+
+### Cross validation
+
+```{r, message=FALSE}
+set.seed(123)
+
+# container of test errors
+cv.MSE <- NA
+
+# loop over powers of water
+for (i in 1:4) {
+  glm.fit <-  glm(compressive_strength ~ poly(water, i), data = concrete_data)
+  # we use cv.glm's cross-validation and keep the vanilla cv test error
+  cv.MSE[i] <-  cv.glm(concrete_data, glm.fit, K = 10)$delta[1]
+}
+# inspect results object
+cv.MSE
+```
+
+```{r}
+# illustrate results with a line plot connecting the cv.error dots
+plot( x = 1:4, y = cv.MSE, xlab = "power of water", ylab = "CV error", 
+      type = "b", pch = 19, lwd = 2, bty = "n", 
+      ylim = c( min(cv.MSE) - sd(cv.MSE), max(cv.MSE) + sd(cv.MSE) ) )
+
+# horizontal line for 1se to less complexity
+abline(h = min(cv.MSE) + sd(cv.MSE) , lty = "dotted")
+
+# where is the minimum
+points( x = which.min(cv.MSE), y = min(cv.MSE), col = "red", pch = "X", cex = 1.5 )
+```
+
+According to the result, we should choose degree of freedom equals to 4.
+
+### ANOVA
+
+```{r}
+# container for the models we will fit
+models <- vector("list", length(cv.MSE))
+# fit all 15 models
+for( a in 1:length(cv.MSE)){
+  models[[a]] <- glm(compressive_strength ~ poly(water, a), data = concrete_data)
+}
+# f-test
+anova(models[[1]], models[[2]], models[[3]], models[[4]], test = "F")
+```
+
+According to the result from F-test, comparing to the model with 3 degrees of freedom, the model with 4 degree of freedom is significant, so we should choose degree equals to 4.
+
+### Plots of different polynomial fits
+
+```{r}
+plot(compressive_strength ~ water, data = concrete_data, col = "darkgrey",  bty = "n", xlab="water(power=1)")
+waterlims <-  range(concrete_data$water)
+water.grid <-  seq(from = waterlims[1], to = waterlims[2])
+lm.fit <-  lm(compressive_strength ~ poly(water, 1), data = concrete_data)
+lm.pred <-  predict(lm.fit, data.frame(water = water.grid), se = TRUE)
+# mean prediction
+lines(x = water.grid , y = lm.pred$fit, col = "blue", lwd = 2)
+# uncertainty bands
+matlines( x = water.grid, y = cbind( lm.pred$fit + 2*lm.pred$se.fit, lm.pred$fit - 2*lm.pred$se.fit),
+          lty = "dashed", col = "blue")
+```
+
+```{r}
+plot(compressive_strength ~ water, data = concrete_data, col = "darkgrey",  bty = "n", xlab="water(power=2)")
+waterlims <-  range(concrete_data$water)
+water.grid <-  seq(from = waterlims[1], to = waterlims[2])
+lm.fit <-  lm(compressive_strength ~ poly(water, 2), data = concrete_data)
+lm.pred <-  predict(lm.fit, data.frame(water = water.grid), se = TRUE)
+# mean prediction
+lines(x = water.grid , y = lm.pred$fit, col = "blue", lwd = 2)
+# uncertainty bands
+matlines( x = water.grid, y = cbind( lm.pred$fit + 2*lm.pred$se.fit, lm.pred$fit - 2*lm.pred$se.fit),
+          lty = "dashed", col = "blue")
+```
+
+```{r}
+plot(compressive_strength ~ water, data = concrete_data, col = "darkgrey",  bty = "n", xlab="water(power=3)")
+waterlims <-  range(concrete_data$water)
+water.grid <-  seq(from = waterlims[1], to = waterlims[2])
+lm.fit <-  lm(compressive_strength ~ poly(water, 3), data = concrete_data)
+lm.pred <-  predict(lm.fit, data.frame(water = water.grid), se = TRUE)
+# mean prediction
+lines(x = water.grid , y = lm.pred$fit, col = "blue", lwd = 2)
+# uncertainty bands
+matlines( x = water.grid, y = cbind( lm.pred$fit + 2*lm.pred$se.fit, lm.pred$fit - 2*lm.pred$se.fit),
+          lty = "dashed", col = "blue")
+```
+
+```{r}
+plot(compressive_strength ~ water, data = concrete_data, col = "darkgrey",  bty = "n", xlab="water(power=4)")
+waterlims <-  range(concrete_data$water)
+water.grid <-  seq(from = waterlims[1], to = waterlims[2])
+lm.fit <-  lm(compressive_strength ~ poly(water, 4), data = concrete_data)
+lm.pred <-  predict(lm.fit, data.frame(water = water.grid), se = TRUE)
+# mean prediction
+lines(x = water.grid , y = lm.pred$fit, col = "blue", lwd = 2)
+# uncertainty bands
+matlines( x = water.grid, y = cbind( lm.pred$fit + 2*lm.pred$se.fit, lm.pred$fit - 2*lm.pred$se.fit),
+          lty = "dashed", col = "blue")
+```
+
+## Question 3
+
+### A range of df
+
+```{r}
+p <- ggplot(data = concrete_data, aes(x = water, y = compressive_strength)) +
+     geom_point(color = rgb(.2, .4, .2, .5))
+```
+
+Degrees of freedom = 40
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength, df = 40)
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+Degrees of freedom = 50
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength, df = 50)
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+Degrees of freedom = 60
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength, df = 60)
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+Degrees of freedom = 70
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength, df = 70)
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+Degrees of freedom = 80
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength, df = 80)
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+With degrees of freedom increase, the fitted model become more flexible.
+
+### Generalized cross-validation
+
+```{r}
+fit.ss <- smooth.spline(concrete_data$water, concrete_data$compressive_strength)
+fit.ss$df
+
+pred.ss <- predict(fit.ss,
+                   x = water.grid)
+
+pred.ss.df <- data.frame(pred = pred.ss$y,
+                         water = water.grid)
+
+p <- ggplot(data = concrete_data, aes(x = water, y = compressive_strength)) +
+     geom_point(color = rgb(.2, .4, .2, .5))
+
+p +
+geom_line(aes(x = water, y = pred), data = pred.ss.df,
+          color = rgb(.8, .1, .1, 1))
+```
+
+The degree of freedom obtained by generalized cross-validation is 68.88 and the fitted model is very flexible.
+
+## Question 4
+
+```{r}
+gam.m1 <- gam(compressive_strength ~ cement+blast_furnace_slag+fly_ash+s(water)+superplasticizer+coarse_aggregate+fine_aggregate+age, data = concrete_data)
+summary(gam.m1)
+```
+
+```{r}
+plot(gam.m1)
+```
+
+According to the result, we can find that when water equals to around 145, the strength is the highest and when water equals to around 225, the strength is the lowest.

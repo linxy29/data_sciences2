@@ -1,0 +1,129 @@
+---
+title: "Homework 1"
+author: "Xinyi Lin"
+date: "2/25/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(glmnet)
+library(pls)
+```
+
+## Input data
+
+```{r, message=FALSE, warning=FALSE}
+train_data = read_csv("./solubility_train.csv")
+test_data = read_csv("./solubility_test.csv")
+```
+
+## Question 1
+
+```{r}
+linear_model = lm(Solubility ~ ., train_data)
+summary(linear_model)
+
+# calculate MSE
+mse = mean((predict(linear_model, test_data)-test_data$Solubility)^2)
+mse
+```
+
+## Question 2
+
+By using cross validation, we can get $\lambda$ for ridge regression.
+
+```{r}
+set.seed(123)
+x = as.matrix(train_data[,-229])
+
+# fit ridge model
+ridge.mod <- glmnet(x, train_data$Solubility, alpha=0, lambda = exp(seq(-5, 0, length=300)))
+
+cv.ridge <- cv.glmnet(x, train_data$Solubility, 
+                      alpha = 0, 
+                      lambda = exp(seq(-5, 0, length=300)), 
+                      type.measure = "mse")
+
+plot(cv.ridge)
+```
+
+```{r}
+# get lambda
+cv.ridge$lambda.min
+# fit final ridge model
+predict(ridge.mod, s = cv.ridge$lambda.min, type="coefficients")
+```
+
+Now, we can calculate MSE
+```{r}
+y_predict = predict(ridge.mod, s = cv.ridge$lambda.min, newx = as.matrix(test_data[,-229]))
+mean((y_predict-test_data$Solubility)^2)
+```
+
+## Question 3
+
+By using cross validation, we can get $\lambda$ for lasso regression.
+
+```{r}
+set.seed(123)
+
+# fit lasso model
+lasso.mod <- glmnet(x, train_data$Solubility, alpha=1, lambda = exp(seq(-5, 0, length=300)))
+
+cv.lasso <- cv.glmnet(x, train_data$Solubility, 
+                      alpha = 1, 
+                      lambda = exp(seq(-5, 0, length=300)), 
+                      type.measure = "mse")
+
+plot(cv.lasso)
+```
+
+```{r}
+# get lambda
+cv.lasso$lambda.min
+# fit final lasso model
+predict(lasso.mod, s = cv.lasso$lambda.min, type="coefficients")
+```
+
+```{r}
+# calculate MSE
+y_predict = predict(lasso.mod, s = cv.lasso$lambda.min, newx = as.matrix(test_data[,-229]))
+mean((y_predict-test_data$Solubility)^2)
+```
+
+## Question 4
+
+```{r}
+set.seed(123)
+pcr.mod <- pcr(Solubility~., 
+               data = train_data,
+               scale = TRUE, 
+               validation = "CV")
+
+summary(pcr.mod)
+```
+
+According to the result, we should choose 150 components
+
+```{r}
+predy2.pcr <- predict(pcr.mod, newdata = test_data, 
+                      ncomp = 150)
+# calculate MSE
+mean((predy2.pcr-test_data$Solubility)^2)
+```
+
+## Question 4
+
+methods|Test error
+-------|----------
+linear |0.5559
+ridge  |0.5455
+lasso  |0.4914
+PCR    |0.5484
+
+According to results, we can find that lasso give the lowest test error and linear give the highest test error. Since linear model is the simplest, it is reasonable that linear model give the highest test error. While lasso model give the lowest test error, which means it fit this data better.  
+
+Besides, instead of being shrunk towards zero in ridge model, lots of coefficients are shrunk to zero in lasso model, which is one of the character of lasso.
