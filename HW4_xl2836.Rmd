@@ -7,26 +7,150 @@ output:
   html_document: default
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+```{r, echo = T, message = FALSE, results='hide', warning=FALSE}
+library(lasso2) # only for data
+library(rpart) # for cart model
+library(rpart.plot) 
+library(randomForest)
+library(ranger)
+library(caret)
+library(gbm) # for boosting model
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+```{r}
+data(Prostate)
 ```
 
-## Including Plots
+## Problem 1
 
-You can also embed plots, for example:
+### Question 1
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+Fit the regression tree.
+
+```{r}
+set.seed(123)
+tree1 <- rpart(formula = lpsa~., data = Prostate)
+rpart.plot(tree1)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+Use cross-validation to determine the optimal tree size. The following is the optimal tree.
+
+```{r, fig.height=3, fig.width=4}
+set.seed(123)
+tree2 <- rpart(formula = lpsa~., data = Prostate,
+               control = rpart.control(cp = 0.1))
+rpart.plot(tree2)
+```
+
+```{r}
+cpTable <- printcp(tree1)
+plotcp(tree1)
+```
+
+According to the plot and results given by `cpTable` function, we can find that when the number of splits equals to 6, the tree have lowest cross-validation error. The optimal tree is shown below.
+
+```{r}
+minErr <- which.min(cpTable[,4])
+# minimum cross-validation error
+tree3 <- prune(tree1, cp = cpTable[minErr,1])
+rpart.plot(tree3)
+```
+
+Using the 1 SE rule to obtain optimal tree size.
+
+```{r}
+tree4 <- prune(tree1, cp = cpTable[cpTable[,4]<cpTable[minErr,4]+cpTable[minErr,5],1][1])
+rpart.plot(tree4)
+```
+
+By comparing two tree, we can find that the optimal tree sizes given by cross-validation and 1 SE rule are different.
+
+### Question 2
+
+We choose the final tree based on the cross-validation error and following is the final tree.
+
+```{r}
+rpart.plot(tree3)
+```
+
+Interpretation of the node 3.3:
+
+If the log of cancer volume is equals or larger than 2.5 and smaller than 3.8, than the log of prostate specific antigen is 3.3.
+
+### Question 3
+
+Fit the bagging model and get the variable importance.
+
+```{r}
+set.seed(123)
+bagging.final.per <- ranger(lpsa~., Prostate,
+                        mtry = 8, splitrule = "variance",
+                        min.node.size = 2,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE) 
+
+barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+```
+
+### Question 4
+
+Using `caret` package to find out the best mtry.
+
+```{r}
+rf.grid <- expand.grid(mtry = 1:6,
+                       splitrule = "variance",
+                       min.node.size = 1:6)
+set.seed(123)
+ctrl <- trainControl(method = "cv")
+rf.fit <- train(lpsa~., Prostate,
+                method = "ranger",
+                tuneGrid = rf.grid,
+                trControl = ctrl)
+
+ggplot(rf.fit, highlight = TRUE)
+```
+
+According to the result, the best mtry is 4 and best minimal node size is 2.
+
+Fit the bagging model and get the variable importance.
+
+```{r}
+set.seed(123)
+bagging.final.per <- ranger(lpsa~., Prostate,
+                        mtry = 4, splitrule = "variance",
+                        min.node.size = 2,
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE) 
+
+barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
+```
+
+### Question 5
+
+First, tune gbm model.
+
+```{r}
+gbm.grid <- expand.grid(n.trees = c(2000,3000),
+                        interaction.depth = 2:10,
+                        shrinkage = c(0.001,0.003,0.005),
+                        n.minobsinnode = 1)
+set.seed(1)
+gbm.fit <- train(lpsa~., Prostate,
+                 method = "gbm",
+                 tuneGrid = gbm.grid,
+                 trControl = ctrl,
+                 verbose = FALSE)
+
+ggplot(gbm.fit, highlight = TRUE)
+```
+
+Get the variable importance.
+
+```{r}
+summary(gbm.fit$finalModel, las = 2, cBars = 19, cex.names = 1)
+```
+
