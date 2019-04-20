@@ -23,6 +23,7 @@ Last time we use all the data to build the models. This time we split the data i
 data(Hitters)
 # delete rows containing the missing data
 Hitters <- na.omit(Hitters)
+head(Hitters)
 
 set.seed(2019)
 trRows <- createDataPartition(Hitters$Salary,

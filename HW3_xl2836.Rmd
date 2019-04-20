@@ -1,0 +1,209 @@
+---
+title: "Homework 3"
+author: "Xinyi Lin"
+date: "4/1/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, ,message=FALSE, warning=FALSE}
+library(ISLR)
+library(tidyverse)
+library(ggplot2)
+library(patchwork)
+library(MASS)
+library(caret)
+library(pROC)
+```
+
+## Problem 1
+
+```{r}
+weekly = Weekly %>% 
+  janitor::clean_names()
+```
+
+```{r}
+#transparentTheme(trans = .4)
+featurePlot(x = weekly[, 1:8], 
+            y = weekly$direction,
+            scales = list(x=list(relation="free"), 
+                        y=list(relation="free")),
+            plot = "density", pch = "|", 
+            auto.key = list(columns = 2))
+```
+
+## Problem 2
+
+The logistic regression are shown below:
+
+```{r}
+set.seed(123)
+glm.fit <- glm(direction~lag1 + lag2 + lag3 + lag4 + lag5 + volume, 
+               data = weekly, 
+               family = binomial)
+summary(glm.fit)
+```
+
+`Lag2` is statistically significant.
+
+## Problem 3
+
+Using 0.5 as cutoff for Bayes classifier and evaluating its performance. Confusion matrix is as following:
+
+```{r}
+full.pred.prob  <- predict(glm.fit, newdata = weekly,
+                           type = "response")
+full.pred <- rep("Down", length(full.pred.prob))
+full.pred[full.pred.prob>0.5] <- "Up"
+
+
+# confusionMatrix(data = as.factor(test.pred),
+#                 reference = dat$diabetes[-rowTrain])
+
+res = confusionMatrix(data = as.factor(full.pred),
+                reference = weekly$direction,
+                positive = "Up")
+res$table
+```
+
+The overall fraction of correct predictions is:$\frac{54+557}{54+48+430+557} = 0.561$
+
+According to the confusion matrix, we can find that only 54 "Down" direction were predicted properly, but 557 "Up" direction were predicted properly and only 48 "Up" direction were predicted to be "Down", but 430 "Down" direction were predicted to be "Up" direction. This means more direction are predicted as "Up" than "Down". This classifier have high sensitivity and low specificity.
+
+### Problem 4
+
+Plot the ROC curve and calculate AUC
+
+```{r}
+roc.glm <- roc(weekly$direction, full.pred.prob)
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
+```
+
+The black curve is ROC curve and AUC equals to 0.554. According to this plot, ROC curve is very close to stright line and value of AUC is close to 0.5, we can know that this classifier doesn't perform well.
+
+### Problem 5
+
+Fit logistic regression model
+
+```{r}
+rowTrain = as.vector(c(1:985))  # get training data
+set.seed(123)
+glm.fit <- glm(direction~lag1 + lag2, 
+               data = weekly, 
+               subset = rowTrain,
+               family = binomial)
+summary(glm.fit)
+```
+
+Plot the ROC curve and calculate AUC
+
+```{r}
+test.pred.prob  <- predict(glm.fit, newdata = weekly[-rowTrain,],
+                           type = "response")
+test.pred <- rep("Down", length(test.pred.prob))
+test.pred[test.pred.prob>0.5] <- "Up"
+roc.glm <- roc(weekly$direction[-rowTrain], test.pred.prob)
+plot(roc.glm, legacy.axes = TRUE, print.auc = TRUE)
+plot(smooth(roc.glm), col = 4, add = TRUE)
+```
+
+The black curve is ROC curve and AUC equals to 0.556. According to this plot, the value of AUC is close to 0.5, we can know that this classifier doesn't perform well.
+
+### Problem 6
+
+LDA
+
+```{r}
+lda.fit <- lda(direction~lag1 + lag2, data = weekly,
+               subset = rowTrain)
+plot(lda.fit)
+```
+
+Evaluate the test set performance using ROC.
+
+```{r}
+lda.pred <- predict(lda.fit, newdata = weekly[-rowTrain,])
+#head(lda.pred$posterior)
+
+roc.lda <- roc(weekly$direction[-rowTrain], lda.pred$posterior[,2], 
+               levels = c("Down", "Up"))
+
+plot(roc.lda, legacy.axes = TRUE, print.auc = TRUE)
+```
+
+The black curve is ROC curve and AUC equals to 0.557.
+
+QDA
+
+```{r}
+qda.fit <- qda(direction~lag1 + lag2, data = weekly,
+               subset = rowTrain)
+```
+
+Evaluate the test set performance using ROC.
+
+```{r}
+qda.pred <- predict(qda.fit, newdata = weekly[-rowTrain,],type="prob")
+#head(qda.pred$posterior)
+roc.qda <- roc(weekly$direction[-rowTrain], qda.pred$posterior[,2], 
+               levels = c("Down", "Up"))
+
+plot(roc.qda, legacy.axes = TRUE, print.auc = TRUE)
+```
+
+The black curve is ROC curve and AUC equals to 0.529.
+
+### Problem 7
+
+```{r}
+set.seed(123)
+
+ctrl <- trainControl(method = "repeatedcv",
+                     repeats = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+model.knn <- train(direction ~ lag1 + lag2, 
+                 data = weekly,
+               subset = rowTrain,
+                 method = "knn",
+               trControl = ctrl,
+               preProcess = c("center","scale"), 
+               tuneGrid = data.frame(k = seq(1,500,by=5)))
+
+ggplot(model.knn)
+```
+
+In R, the range of k cannot larger than 500. Even though according to the plot, best k seems to be larger than 500, the knn model is not stable. 
+
+```{r}
+knn.pred <- predict.train(model.knn, newdata = weekly[-rowTrain,],type="prob")
+roc.knn <- roc(weekly$direction[-rowTrain], knn.pred[,"Down"], levels = c("Down", "Up"))
+plot(roc.knn, legacy.axes = TRUE, print.auc = TRUE)
+```
+
+The black curve is ROC curve and AUC equals to 0.531.
+
+```{r}
+set.seed(123)
+model.lda <- train(x = weekly[rowTrain,2:3],
+                   y = weekly$direction[rowTrain],
+                   method = "lda",
+                   metric = "ROC",
+                   trControl = ctrl)
+model.qda <- train(x = weekly[rowTrain,2:3],
+                   y = weekly$direction[rowTrain],
+                   method = "qda",
+                   metric = "ROC",
+                   trControl = ctrl)
+```
+
+```{r}
+res <- resamples(list(LDA = model.lda, QDA = model.qda,KNN = model.knn))
+summary(res)
+```
+
+According to ROC, KNN model performs better than LDA and QDA model, but according to specificity and sensitivity, knn models give abnormal performance. According to the ROC and specificity, LDA model performs better than QDA model. So we can choose different models based on requirements of high sensitivity or high specificity.
