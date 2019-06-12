@@ -1,0 +1,96 @@
+---
+title: "Homework 5"
+author: "Xinyi Lin"
+date: "4/26/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r, message=FALSE, warning=FALSE}
+library(ISLR)
+library(caret)
+library(e1071)
+```
+
+## Question 1
+
+Get training data and test data
+
+```{r}
+#head(OJ)
+set.seed(1)
+rowTrain <- createDataPartition(y = OJ$Purchase,
+                                p = 0.75,
+                                list = FALSE)
+```
+
+Fit the support vector classifier to the training data.
+
+```{r}
+ctrl <- trainControl(method = "cv")
+
+set.seed(1)
+svml.fit <- train(Purchase~., 
+                  data = OJ[rowTrain,], 
+                  method = "svmLinear2",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = data.frame(cost = exp(seq(-5,1,len=20))),
+                  trControl = ctrl)
+
+ggplot(svml.fit, highlight = TRUE)
+```
+
+Training and test error rates
+
+```{r}
+#training error rate
+pred.svml <- predict(svml.fit)
+mean(OJ[rowTrain,]$Purchase != pred.svml)
+#test error rate
+pred.svml <- predict(svml.fit, newdata = OJ[-rowTrain,])
+mean(OJ[-rowTrain,]$Purchase != pred.svml)
+```
+
+The error rate of training data is 0.158. The error rate of test data is 0.165.
+
+## Question 2
+
+Fit the support vector machine model.
+
+```{r}
+svmr.grid <- expand.grid(C = exp(seq(-4,5,len=10)),
+                         sigma = exp(seq(-8,-3,len=5)))
+set.seed(1)             
+svmr.fit <- train(Purchase~., 
+                  data = OJ[rowTrain,],
+                  method = "svmRadial",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = svmr.grid,
+                  trControl = ctrl)
+
+ggplot(svmr.fit, highlight = TRUE)
+```
+
+Training and test error rates
+
+```{r}
+#training error rate
+pred.svmr <- predict(svmr.fit)
+mean(OJ[rowTrain,]$Purchase != pred.svmr)
+#test error rate
+pred.svmr <- predict(svmr.fit, newdata = OJ[-rowTrain,])
+mean(OJ[-rowTrain,]$Purchase != pred.svmr)
+```
+
+According to results, the error rate of training data is 0.161. The error rate of test data is 0.165.
+
+## Question 3
+
+```{r}
+resamp <- resamples(list(svmr = svmr.fit, svml = svml.fit))
+summary(resamp)
+bwplot(resamp)
+```
+
+According to results, these two models have similar performance. However, the variance of accuracy is smaller and the mean and median are higher in support vector classifier, so support vector classifier performs slightly better.

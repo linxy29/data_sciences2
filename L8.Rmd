@@ -1,0 +1,136 @@
+---
+title: "Support Vector Machines"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = T, message = FALSE, results='hide', warning=FALSE}
+library(mlbench)
+library(caret)
+library(e1071)
+```
+
+We use the Pima Indians Diabetes Database (used in L6.Rmd) for illustration. The data contain 768 observations and 9 variables. The outcome is a binary variable `diabetes`. 
+
+```{r}
+data(PimaIndiansDiabetes)
+dat <- PimaIndiansDiabetes
+dat$diabetes <- factor(dat$diabetes, c("pos", "neg"))
+
+set.seed(1)
+rowTrain <- createDataPartition(y = dat$diabetes,
+                                p = 0.75,
+                                list = FALSE)
+```
+
+
+
+## Using `e1071`
+
+### Linear boundary
+Most real data sets will not be fully separable by a linear boundary. Support vector classifiers with a tuning parameter `cost`, which quantifies the penalty associated with having an observation on the wrong side of the classification boundary, can be used to build a linear boundary.
+```{r}
+set.seed(1)
+linear.tune <- tune.svm(diabetes~., 
+                        data = dat[rowTrain,], 
+                        kernel = "linear", 
+                        cost = exp(seq(-5,1,len=20)))
+summary(linear.tune)
+
+best.linear <- linear.tune$best.model
+summary(best.linear)
+
+pred.linear <- predict(best.linear, newdata = dat[-rowTrain,])
+
+confusionMatrix(data = pred.linear, 
+                reference = dat$diabetes[-rowTrain])
+
+plot(best.linear, dat[rowTrain,], glucose~pressure,
+     slice = list(pregnant = 5, triceps = 20,
+                  insulin = 20, mass = 25,
+                  pedigree = 1, age = 50),
+                  symbolPalette = c("orange","darkblue"),
+                  color.palette = terrain.colors)
+```
+
+### Radial kernel
+Support vector machines can construct classification boundaries that are nonlinear in shape. We use the radial kernel.
+```{r}
+set.seed(1)
+radial.tune <- tune.svm(diabetes~., 
+                        data = dat[rowTrain,], 
+                        kernel = "radial", 
+                        cost = exp(seq(-4,5,len=10)),
+                        gamma = exp(seq(-8,-3,len=5)))
+
+summary(radial.tune)
+
+
+best.radial <- radial.tune$best.model
+summary(best.radial)
+
+pred.radial <- predict(best.radial, newdata = dat[-rowTrain,])
+
+confusionMatrix(data = pred.radial, 
+                reference = dat$diabetes[-rowTrain])
+
+plot(best.radial, dat[rowTrain,], glucose~pressure,
+     slice = list(pregnant = 5, triceps = 20,
+                  insulin = 20, mass = 25,
+                  pedigree = 1, age = 40),
+     symbolPalette = c("orange","darkblue"),
+     color.palette = terrain.colors)
+     
+```   
+     
+## Using `caret`
+
+```{r}
+ctrl <- trainControl(method = "cv")
+
+set.seed(1)
+svml.fit <- train(diabetes~., 
+                  data = dat[rowTrain,], 
+                  method = "svmLinear2",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = data.frame(cost = exp(seq(-5,1,len=20))),
+                  trControl = ctrl)
+
+ggplot(svml.fit, highlight = TRUE)
+```
+
+
+```{r}
+svmr.grid <- expand.grid(C = exp(seq(-4,5,len=10)),
+                         sigma = exp(seq(-8,-3,len=5)))
+set.seed(1)             
+svmr.fit <- train(diabetes~., dat, 
+                  subset = rowTrain,
+                  method = "svmRadial",
+                  preProcess = c("center", "scale"),
+                  tuneGrid = svmr.grid,
+                  trControl = ctrl)
+
+ggplot(svmr.fit, highlight = TRUE)
+```
+
+```{r}
+resamp <- resamples(list(svmr = svmr.fit, svml = svml.fit))
+bwplot(resamp)
+```
+
+# Test data performance
+We finally look at the test data performance.
+```{r}
+pred.svml <- predict(svml.fit, newdata = dat[-rowTrain,])
+pred.svmr <- predict(svmr.fit, newdata = dat[-rowTrain,])
+
+confusionMatrix(data = pred.svml, 
+                reference = dat$diabetes[-rowTrain])
+
+confusionMatrix(data = pred.svmr, 
+                reference = dat$diabetes[-rowTrain])
+```

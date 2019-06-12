@@ -15,6 +15,7 @@ library(randomForest)
 library(ranger)
 library(caret)
 library(gbm) # for boosting model
+library(ISLR)
 ```
 
 ```{r}
@@ -25,67 +26,86 @@ data(Prostate)
 
 ### Question 1
 
-Fit the regression tree.
+Fit the regression tree. Use cross-validation to determine the optimal tree size. The following is the optimal tree.
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
+ctrl <- trainControl(method = "cv")
+
 set.seed(123)
-tree1 <- rpart(formula = lpsa~., data = Prostate)
-rpart.plot(tree1)
+rpart.fit1 <- train(lpsa~., Prostate,
+                    method = "rpart",
+                    tuneGrid = data.frame(cp = exp(seq(-6,-2, length = 20))),
+                    trControl = ctrl)
+ggplot(rpart.fit1, highlight = TRUE)
+rpart.plot(rpart.fit1$finalModel)
+rpart.fit1$finalModel$cptable
 ```
 
-Use cross-validation to determine the optimal tree size. The following is the optimal tree.
-
-```{r, fig.height=3, fig.width=4}
-set.seed(123)
-tree2 <- rpart(formula = lpsa~., data = Prostate,
-               control = rpart.control(cp = 0.1))
-rpart.plot(tree2)
-```
-
-```{r}
-cpTable <- printcp(tree1)
-plotcp(tree1)
-```
-
-According to the plot and results given by `cpTable` function, we can find that when the number of splits equals to 6, the tree have lowest cross-validation error. The optimal tree is shown below.
-
-```{r}
-minErr <- which.min(cpTable[,4])
-# minimum cross-validation error
-tree3 <- prune(tree1, cp = cpTable[minErr,1])
-rpart.plot(tree3)
-```
+According to the plot and results given by `cptable`, we can find that when the number of splits equals to 6, the tree have lowest cross-validation error.
 
 Using the 1 SE rule to obtain optimal tree size.
 
 ```{r}
-tree4 <- prune(tree1, cp = cpTable[cpTable[,4]<cpTable[minErr,4]+cpTable[minErr,5],1][1])
-rpart.plot(tree4)
+# 1SE rule
+set.seed(123)
+rpart.fit2 <- train(lpsa~., Prostate,
+                    method = "rpart",
+                    tuneGrid = data.frame(cp = exp(seq(-6,-2, length = 20))),
+                    trControl = trainControl(method = "cv",
+                                            number = 10,
+                                            selectionFunction = "oneSE"))
+ggplot(rpart.fit2, highlight = TRUE)
+rpart.plot(rpart.fit2$finalModel)
+rpart.fit2$finalModel$cptable
 ```
 
-By comparing two tree, we can find that the optimal tree sizes given by cross-validation and 1 SE rule are different.
+According to the plot and results given by `cptable`, we can find that when the number of splits equals to 3, the tree have lowest cross-validation error based on 1 SE rule. By comparing two tree, we can find that optimal tree sizes given by cross-validation and 1 SE rule are different.
 
 ### Question 2
 
-We choose the final tree based on the cross-validation error and following is the final tree.
+First, we compare cross-validation errors of two models.
 
 ```{r}
-rpart.plot(tree3)
+resamp1 <- resamples(list(rpart.fit1 = rpart.fit1, rpart.fit2 = rpart.fit2))
+summary(resamp1)
 ```
 
-Interpretation of the node 3.3:
+As their cross-validation errors are very close, we choose optimal tree obtained by 1 SE rule because it is simpler. Following are the final tree.
 
-If the log of cancer volume is equals or larger than 2.5 and smaller than 3.8, than the log of prostate specific antigen is 3.3.
+```{r}
+rpart.plot(rpart.fit2$finalModel)
+```
+
+Interpretation of the node 3.8:
+
+If the log of cancer volume is equals or larger than 2.5, than the mean of the log of prostate specific antigen is 3.8.This node contain 22% of training responses.
 
 ### Question 3
 
+Using `caret` package to find out the best minimal node size.
+
+```{r}
+rf.grid1 <- expand.grid(mtry = 8,
+                       splitrule = "variance",
+                       min.node.size = 1:30)
+set.seed(123)
+rf.fit1 <- train(lpsa~., Prostate,
+                method = "ranger",
+                tuneGrid = rf.grid1,
+                trControl = ctrl)
+
+ggplot(rf.fit1, highlight = TRUE)
+rf.fit1$finalModel$min.node.size
+```
+
+According to the result, the best minimal node size is 27.
+
 Fit the bagging model and get the variable importance.
 
 ```{r}
-set.seed(123)
 bagging.final.per <- ranger(lpsa~., Prostate,
                         mtry = 8, splitrule = "variance",
-                        min.node.size = 2,
+                        min.node.size = 27,
                         importance = "permutation",
                         scale.permutation.importance = TRUE) 
 
@@ -93,34 +113,37 @@ barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE),
         las = 2, horiz = TRUE, cex.names = 0.7,
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
 ```
+
+According to the plot above, the importance of each variable are `lcavol` > `lweight` > `svi` > `pgg45` > `lcp` > `lbph` > `gleason` > `age`.
 
 ### Question 4
 
-Using `caret` package to find out the best mtry.
+Using `caret` package to find out the best mtry and minimal node size.
 
 ```{r}
-rf.grid <- expand.grid(mtry = 1:6,
+rf.grid2 <- expand.grid(mtry = 2:7,
                        splitrule = "variance",
-                       min.node.size = 1:6)
+                       min.node.size = 1:30)
 set.seed(123)
 ctrl <- trainControl(method = "cv")
-rf.fit <- train(lpsa~., Prostate,
+rf.fit2 <- train(lpsa~., Prostate,
                 method = "ranger",
-                tuneGrid = rf.grid,
+                tuneGrid = rf.grid2,
                 trControl = ctrl)
 
-ggplot(rf.fit, highlight = TRUE)
+ggplot(rf.fit2, highlight = TRUE)
+rf.fit1$finalModel$min.node.size
 ```
 
-According to the result, the best mtry is 4 and best minimal node size is 2.
+According to the result, the best mtry is 5 and best minimal node size is 27.
 
-Fit the bagging model and get the variable importance.
+Fit the random forests model and get the variable importance.
 
 ```{r}
 set.seed(123)
 bagging.final.per <- ranger(lpsa~., Prostate,
-                        mtry = 4, splitrule = "variance",
-                        min.node.size = 2,
+                        mtry = 5, splitrule = "variance",
+                        min.node.size = 27,
                         importance = "permutation",
                         scale.permutation.importance = TRUE) 
 
@@ -128,15 +151,17 @@ barplot(sort(ranger::importance(bagging.final.per), decreasing = FALSE),
         las = 2, horiz = TRUE, cex.names = 0.7,
         col = colorRampPalette(colors = c("darkred","white","darkblue"))(19))
 ```
+
+According to the plot above, the importance of each variable are `lcavol` > `lweight` > `svi` > `lcp` > `pgg45` > `lbph` > `gleason` > `age`.
 
 ### Question 5
 
 First, tune gbm model.
 
 ```{r}
-gbm.grid <- expand.grid(n.trees = c(2000,3000),
+gbm.grid <- expand.grid(n.trees = c(2500,3000,3500),
                         interaction.depth = 2:10,
-                        shrinkage = c(0.001,0.003,0.005),
+                        shrinkage = c(0.001,0.0015,0.002),
                         n.minobsinnode = 1)
 set.seed(1)
 gbm.fit <- train(lpsa~., Prostate,
@@ -154,3 +179,135 @@ Get the variable importance.
 summary(gbm.fit$finalModel, las = 2, cBars = 19, cex.names = 1)
 ```
 
+According to the plot above, the importance of each variable are `lcavol` > `lweight` > `svi` > `lcp` > `pgg45` > `age` > `lbph` > `gleason`.
+
+### Question 6
+
+```{r}
+resamp2 <- resamples(list(rpart.fit1 = rpart.fit1, rpart.fit2 = rpart.fit2, rf.fit1 = rf.fit1, rf.fit2 = rf.fit2, gbm.fit = gbm.fit))
+summary(resamp2)
+```
+
+According to results above, we can find that the cross-validation error of boosting model is the smallest, so the boosting model is the best model.
+
+## Problem 2
+
+```{r}
+OJ$Purchase = as.factor(OJ$Purchase)
+set.seed(123)
+train_ind <- sample(seq_len(nrow(OJ)), size = 800)
+
+train <- OJ[train_ind, ]
+test <- OJ[-train_ind, ]
+```
+
+### Question 1
+
+Fit the classification tree and use cross-validation to determine the tree size. The plot for optimal tree are shown below.
+
+```{r}
+ctrl <- trainControl(method = "repeatedcv",
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+
+set.seed(1)
+rpart.fit <- train(Purchase~., train, 
+                   method = "rpart",
+                   tuneGrid = data.frame(cp = exp(seq(-8,-6, len = 20))),
+                   trControl = ctrl,
+                   metric = "ROC")
+ggplot(rpart.fit, highlight = TRUE)
+rpart.plot(rpart.fit$finalModel)
+```
+
+Predict the response on the test data and calculate the test classification error rate.
+
+```{r}
+rpart.pred <- predict(rpart.fit, newdata = test)
+mean(test$Purchase != rpart.pred)
+```
+
+According to the result shown above, the test classification error rate is 21.11%.
+
+### Question 2
+
+Fit random forests using training data.
+
+```{r}
+rf.grid <- expand.grid(mtry = 3:8,
+                       splitrule = "gini",
+                       min.node.size = seq(20,80,5))
+set.seed(123)
+rf.fit <- train(Purchase~., train, 
+                method = "ranger",
+                tuneGrid = rf.grid,
+                metric = "ROC",
+                trControl = ctrl)
+
+ggplot(rf.fit, highlight = TRUE)
+rf.fit$finalModel$min.node.size
+```
+
+Get variable importance
+
+```{r}
+set.seed(123)
+rf.final <- ranger(Purchase~., train, 
+                        mtry = 7, 
+                        min.node.size = 55,
+                        splitrule = "gini",
+                        importance = "permutation",
+                        scale.permutation.importance = TRUE) 
+
+barplot(sort(ranger::importance(rf.final), decreasing = FALSE), 
+        las = 2, horiz = TRUE, cex.names = 0.7,
+        col = colorRampPalette(colors = c("cyan","blue"))(8))
+```
+
+According to the plot above, the importance of each variable are `LoyalCH` > `PriceDiff` > `alePriceMM` > `ListPriceDiff` > `STORE` > `WeekofPurchase` > `SpecialCH` > `PctDiscMM` > `DiscMM` > `PctDiscCH` > `SalePriceCH` > `Store7` > `PriceCH` > `DiscCH` > `SpecialMM` > `PriceMM`.
+
+Predict the response on the test data and calculate the test classification error rate.
+
+```{r}
+rf.pred <- predict(rf.fit, newdata = test)
+mean(test$Purchase != rf.pred)
+```
+
+According to the result shown above, the test classification error rate is 16.30%.
+
+### Question 3
+
+Fit the boosting model.
+
+```{r}
+gbm.grid <- expand.grid(n.trees = c(3500,4000,4500),
+                        interaction.depth = 1:6,
+                        shrinkage = c(0.001,0.002),
+                        n.minobsinnode = 1)
+set.seed(123)
+# Binomial loss function
+gbm.fit <- train(Purchase~., train, 
+                 tuneGrid = gbm.grid,
+                 trControl = ctrl,
+                 method = "gbm",
+                 distribution = "bernoulli",
+                 metric = "ROC",
+                 verbose = FALSE)
+
+ggplot(gbm.fit, highlight = TRUE)
+```
+
+Get variable importance.
+
+```{r}
+summary(gbm.fit$finalModel, las = 2, cBars = 19, cex.names = 0.7)
+```
+
+According to the plot above, the importance of each variable are `LoyalCH` > `PriceDiff` > `WeekofPurchase` > `ListPriceDiff` > `StoreID` > `alePriceMM` > `STORE` > `SpecialCH` > `DiscCH` > `SalePriceCH` > `PriceMM` > `PriceCH` > `PctDiscCH` > `DiscMM` > `SpecialMM` > `PctDiscMM` > `Store7Yes`.
+
+```{r}
+gbm.pred <- predict(gbm.fit, newdata = test)
+mean(test$Purchase != gbm.pred)
+```
+
+According to the result shown above, the test classification error rate is 14.81%.
